@@ -361,7 +361,7 @@ class QnADemo(Demo):
 
 
 class BeatDetectionDemo(Demo):
-    def __init__(self, gesture_controller: GestureController, tempo_range: tuple= (60, 120), smoothing=4, n_beats_to_track=16, timeout_sec=5,
+    def __init__(self, gesture_controller: GestureController, tempo_range: tuple = (60, 120), smoothing=4, n_beats_to_track=16, timeout_sec=5,
                  timeout_callback=None, user_data=None):
         super().__init__()
         self.gesture_controller = gesture_controller
@@ -376,6 +376,7 @@ class BeatDetectionDemo(Demo):
 
     def start(self):
         self._first_time = True
+        self.gesture_controller.send("look", 8)     # look at the keyboard artist
         self.tempo_tracker.start()
         self._event.clear()
 
@@ -419,7 +420,7 @@ class SongDemo(Demo):
     def __init__(self, gesture_controller, midi_files: [str], gesture_midi_files: [str], shimon_port: MidiOutDevice,
                  start_note_for_phrase_mapping: int = 36, complete_callback=None, user_data=None):
         super().__init__()
-        self.gesture_ctl = gesture_controller
+        self.gesture_controller = gesture_controller
         self.phrase_note_map = start_note_for_phrase_mapping
         self.user_data = user_data
         self.phrases = self._parse_midi(midi_files)
@@ -435,7 +436,7 @@ class SongDemo(Demo):
         self.next_phrase = self.phrases[0]  # intro phrase
         self.next_g_phrase = self.g_phrases[0]  # intro gesture
         self._midi_out_device = shimon_port
-        self.performer = Performer(self._midi_out_device, self.file_tempo, self.ticks, self.gesture_ctl)
+        self.performer = Performer(self._midi_out_device, self.file_tempo, self.ticks, self.gesture_controller)
 
     def __del__(self):
         self.reset()
@@ -445,6 +446,7 @@ class SongDemo(Demo):
 
     def start(self):
         self.playing = True
+        self.gesture_controller.send("look", 8)  # look at the keyboard artist
         self.thread = Thread(target=self.perform, args=(self.next_phrase, self.next_g_phrase))
         self.thread.start()
 
