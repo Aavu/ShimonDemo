@@ -1,0 +1,17 @@
+name: shimon
+dependencies:
+  - ipython=8.1.1
+  - matplotlib=3.5.1
+  - numpy=1.21.2
+  - pip=21.2.4
+  - python=3.9.11
+  - scipy=1.7.3
+  - pip:
+    - librosa==0.9.1
+    - midiutil==1.2.1
+    - pretty-midi==0.2.9
+    - pyaudio==0.2.11
+    - python-rtmidi==1.4.9
+    - resampy==0.2.2
+    - soundfile==0.10.3.post1
+prefix: /Users/violinsimma/opt/anaconda3/envs/shimon
