@@ -8,6 +8,7 @@ import librosa
 import numpy as np
 import pretty_midi
 from pretty_midi import Note
+import madmom
 
 
 class AudioMidiConverter:
@@ -22,6 +23,7 @@ class AudioMidiConverter:
         self.root = librosa.note_to_midi(root)
         self.m = outlier_coeff
         self.empty_arr = np.array([])
+        self.onset_processor = madmom.features.CNNOnsetProcessor()
 
     def convert(self, y, return_onsets=False, velocity=100):
         f0, voiced_flag, voiced_prob = librosa.pyin(y, fmin=self.fmin * 0.9, fmax=self.fmax * 1.1, sr=self.sr,
@@ -67,7 +69,8 @@ class AudioMidiConverter:
         return filtered_notes
 
     def get_onsets(self, y):
-        onsets = librosa.onset.onset_detect(y=y, sr=self.sr, hop_length=self.hop_length, backtrack=True)
+        act = self.onset_processor(y)
+        onsets = librosa.onset.onset_detect(y=y, sr=self.sr, onset_envelope=act, hop_length=self.hop_length)
         onsets = np.hstack([0, onsets])
         return np.unique(onsets)
 
