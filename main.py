@@ -78,33 +78,10 @@ class ShimonDemo:
         self.gesture_controller.reset()
 
 
-# def manage_demos(val, bd_demo: BeatDetectionDemo, qa_demo: QnADemo, song_demo: SongDemo):
-#     if val == DemoType.Beat:
-#         print("Beat Detection Demo")
-#         song_demo.stop()
-#         qa_demo.stop()
-#         bd_demo.start()
-#
-#     elif val == DemoType.QnA:
-#         print("Q & A Demo")
-#         song_demo.stop()
-#         bd_demo.stop()
-#         qa_demo.start()
-#
-#     elif val == DemoType.Song:
-#         print("Song Demo")
-#         bd_demo.stop()
-#         qa_demo.stop()
-#         tempo = bd_demo.get_tempo()
-#         if tempo and tempo > 0:
-#             song_demo.set_tempo(tempo)
-#         song_demo.start()
-
-
 if __name__ == '__main__':
-    PHRASE_MIDI_FILES = ["phrases/intro.mid", "phrases/phrase_1A.mid", "phrases/phrase_1B.mid", "phrases/phrase_2A.mid", "phrases/phrase_2B.mid", "phrases/phrase_3A.mid", "phrases/phrase_3B.mid", "phrases/korvai.mid"]
-    GESTURE_MIDI_FILES = ["gestures/intro.mid", "gestures/gestures_1A.mid", "gestures/gestures_1B.mid", "gestures/gestures_2A.mid", "gestures/gestures_2B.mid", "gestures/gestures_3A.mid", "gestures/gestures_3B.mid", "gestures/korvai.mid"]
-    keyboard = "Vivo S1" # "iRig KEYS 37"
+    PHRASE_MIDI_FILES = [["phrases/intro.mid"], ["phrases/phrase_1A.mid", "phrases/phrase_1B.mid"], ["phrases/phrase_2A.mid", "phrases/phrase_2B.mid"], ["phrases/phrase_3A.mid", "phrases/phrase_3B.mid"], ["phrases/korvai.mid"]]
+    GESTURE_MIDI_FILES = [["gestures/intro.mid"], ["gestures/gestures_1A.mid", "gestures/gestures_1B.mid"], ["gestures/gestures_2A.mid", "gestures/gestures_2B.mid"], ["gestures/gestures_3A.mid", "gestures/gestures_3B.mid"], ["gestures/korvai.mid"]]
+    keyboard = "iRig KEYS 37"   # "iRig KEYS 37", "Vivo S1"
     audio_interface = "Line 6 HX Stomp"
     shimon_port = "to Max 1"
     gesture_port = "to Max 2"  # "gestures"
@@ -140,7 +117,8 @@ if __name__ == '__main__':
 
     song_params = {
         "midi_files": PHRASE_MIDI_FILES,
-        "gesture_midi_files": GESTURE_MIDI_FILES
+        "gesture_midi_files": GESTURE_MIDI_FILES,
+        "start_note_for_phrase_mapping": 72
     }
 
     # Pass 'None' to not filter audioToMidi by any raga
@@ -148,9 +126,9 @@ if __name__ == '__main__':
     qna_params = {
         "raga_map": bahudari_map,
         "sr": 16000,
-        "frame_size": 256,
+        "frame_size": 2048,
         "activation_threshold": 0.01,
-        "n_wait": 32,
+        "n_wait": 8,
         "input_dev_name": audio_interface,
         "outlier_filter_coeff": 2,
         "timeout_sec": 1

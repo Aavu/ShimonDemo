@@ -2,18 +2,16 @@
 Author: Raghavasimhan Sankaranarayanan
 Date: 04/08/2022
 """
-import copy
 
 import librosa
-import numpy as np
-import pretty_midi
-from pretty_midi import Note
 import madmom
+import numpy as np
+from pretty_midi import Note
 
 
 class AudioMidiConverter:
-    def __init__(self, raga_map = None, root='D3', sr=16000, note_min='D2', note_max='A5', frame_size=2048,
-                 hop_length=512, outlier_coeff=2):
+    def __init__(self, raga_map=None, root='D3', sr=16000, note_min='D2', note_max='A5', frame_size=2048,
+                 hop_length=441, outlier_coeff=2):
         self.fmin = librosa.note_to_hz(note_min)
         self.fmax = librosa.note_to_hz(note_max)
         self.hop_length = hop_length
@@ -23,6 +21,7 @@ class AudioMidiConverter:
         self.root = librosa.note_to_midi(root)
         self.m = outlier_coeff
         self.empty_arr = np.array([])
+        # Schlüter, Jan, and Sebastian Böck. "Improved musical onset detection with convolutional neural networks." 2014 ieee international conference on acoustics, speech and signal processing (icassp). IEEE, 2014.
         self.onset_processor = madmom.features.CNNOnsetProcessor()
 
     def convert(self, y, return_onsets=False, velocity=100):
@@ -36,7 +35,8 @@ class AudioMidiConverter:
 
         pitch = librosa.hz_to_midi(f0)
         pitch[np.isnan(pitch)] = 0
-        onsets = self.get_onsets(y)     # There is at-least one onset at [0]
+        onsets = self.get_onsets(y)  # There is at-least one onset at [0]
+        print(onsets)
         notes = np.zeros(len(onsets), dtype=int)
         for i in range(len(onsets) - 1):
             notes[i] = np.round(np.nanmedian(pitch[onsets[i]: onsets[i + 1]]))
@@ -53,7 +53,7 @@ class AudioMidiConverter:
 
         temp = []
         for i in range(len(notes)):
-            temp.append(Note(velocity, notes[i], start=onsets[i], end=onsets[i]+0.1))
+            temp.append(Note(velocity, notes[i], start=onsets[i], end=onsets[i] + 0.1))
 
         if return_onsets:
             return temp, onsets
@@ -65,14 +65,18 @@ class AudioMidiConverter:
         _n = _notes - self.root
         code = (_n + 12) % 12
         # filtered_notes += self.raga_map[code] - code              # when raga_map is an index map
-        filtered_notes = filtered_notes[self.raga_map[code] == 1]   # when raga_map is 1, 0
+        filtered_notes = filtered_notes[self.raga_map[code] == 1]  # when raga_map is 1, 0
         return filtered_notes
 
-    def get_onsets(self, y):
+    def get_onsets(self, y, threshold: float = 0.35, pre_max: int = 3, post_max: int = 3):
         act = self.onset_processor(y)
-        onsets = librosa.onset.onset_detect(y=y, sr=self.sr, onset_envelope=act, hop_length=self.hop_length)
-        onsets = np.hstack([0, onsets])
-        return np.unique(onsets)
+        # onsets = librosa.onset.onset_detect(y=y, sr=self.sr, hop_length=self.hop_length)
+        # onsets = np.hstack([0, onsets])
+
+        onsets = madmom.features.onsets.peak_picking(activations=act, threshold=threshold, pre_max=pre_max,
+                                                     post_max=post_max)
+        return np.unique(np.hstack([0, onsets]))
+        # return np.unique(onsets)
 
     @staticmethod
     def fix_outliers(arr, m=2):
@@ -86,10 +90,10 @@ class AudioMidiConverter:
 
     @staticmethod
     def shift_octave(val, ref):
-        x = (ref - val)//6
+        x = (ref - val) // 6
         res = x % 2
-        x = x//2
-        return val + ((x + res)*12)
+        x = x // 2
+        return val + ((x + res) * 12)
 
     @staticmethod
     def get_tempo(y):

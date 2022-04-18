@@ -21,3 +21,9 @@ Key: D (Notes: D F# G A C D)
    - Loops **verse3** if D#1 key is pressed
    - Plays the korvai if E1 key is pressed
 
+
+Installation:
+note: use ```pip install --global-option='build_ext' --global-option='-I/opt/homebrew/include' --global-option='-L/opt/homebrew/lib' pyaudio``` on M1 Mac to install pyaudio after installing port audio using ```brew install portaudio```
+
+Install the dependencies using environment.yml file
+```conda env create -f environment.yml```

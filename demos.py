@@ -22,10 +22,10 @@ from queue import Queue
 
 
 class Phrase:
-    def __init__(self, notes, onsets, tempo=None, name=None):
+    def __init__(self, notes=None, onsets=None, tempo=None, name=None):
         self.name = name
-        self.notes = notes
-        self.onsets = onsets
+        self.notes = notes if notes is not None else []
+        self.onsets = onsets if onsets is not None else []
         self.tempo = tempo
         self.is_korvai = name == "korvai"
         self.is_intro = name == "intro"
@@ -36,13 +36,35 @@ class Phrase:
     def __len__(self):
         return len(self.notes)
 
+    def __getitem__(self, item):
+        if len(self.notes) > item:
+            return self.notes[item], self.onsets[item]
+        return None, None
+
+    def __setitem__(self, key, value: tuple):
+        if len(self.notes) > key:
+            self.notes[key] = value[0]
+            self.onsets[key] = value[1]
+
+    def append(self, note, onset):
+        self.notes.append(note)
+        self.onsets.append(onset)
+
+    def __str__(self):
+        ret = ""
+        for i in range(len(self.notes)):
+            ret = ret + f"{self.notes[i]}, Onset: {self.onsets[i]}\n"
+        return ret
+
 
 class Performer:
-    def __init__(self, device, tempo=None, ticks=None, gesture_controller=None):
+    def __init__(self, device, tempo=None, ticks=None, gesture_controller=None, min_note_dist_ms=1, max_notes_per_onset=4):
         self.tempo = tempo
         self.device = device
         self.gesture_controller = gesture_controller
         self.ticks = ticks
+        self.min_note_dist_ms = min_note_dist_ms
+        self.max_notes_per_onset = max_notes_per_onset
         self.note_on_thread = Thread()
         self.note_off_thread = Thread()
         self.stop_event = threading.Event()
@@ -100,12 +122,8 @@ class Performer:
             self.gesture_controller.send(note.pitch, 0)
             prev_end = note.end
 
-    def test_perform(self, gestures: Phrase, tempo=None, wait_for_measure_end=False):
-        self.perform_gestures(gestures=gestures, tempo=tempo, wait_for_measure_end=wait_for_measure_end)
-        self.note_on_thread.join()
-        self.note_off_thread.join()
-
     def perform(self, phrase: Phrase, gestures: Phrase or None, tempo=None, wait_for_measure_end=False):
+        phrase = self.filter_phrase(phrase, min_note_dist_ms=self.min_note_dist_ms, max_notes_per_onset=self.max_notes_per_onset)
         notes, onsets = phrase.get()
         m = 1
         if self.tempo and tempo:
@@ -169,6 +187,28 @@ class Performer:
         if remaining_ticks > 0:
             time.sleep(remaining_ticks * 60 / (tempo * self.ticks))
 
+    @staticmethod
+    def filter_phrase(phrase: Phrase, min_note_dist_ms: float = 50, max_notes_per_onset: int = 4):
+        temp = Phrase()
+        notes, onsets = phrase.get()
+        same_onset_count = 0
+
+        min_note_dist = min_note_dist_ms / 1000
+        temp.append(notes[0], onsets[0])
+        for i in range(1, len(phrase)):
+            d_time = abs(notes[i].start - temp[-1][0].start)
+            if d_time < 1e-6:
+                if same_onset_count >= max_notes_per_onset - 1:
+                    continue
+                same_onset_count += 1
+            elif min_note_dist > abs(notes[i].start - temp[-1][0].start):
+                continue
+            else:
+                same_onset_count = 0
+            temp.append(notes[i], onsets[i])
+
+        return temp
+
 
 class Demo:
     def __init__(self):
@@ -176,7 +216,7 @@ class Demo:
 
 
 class QnADemo(Demo):
-    def __init__(self, gesture_controller: GestureController, raga_map, shimon_port: MidiOutDevice, sr=16000, frame_size=256,
+    def __init__(self, gesture_controller: GestureController, raga_map, shimon_port: MidiOutDevice, sr=16000, frame_size=2048,
                  activation_threshold=0.02, n_wait=16, input_dev_name='Line 6 HX Stomp', outlier_filter_coeff=2,
                  timeout_sec=2):
         super().__init__()
@@ -417,15 +457,18 @@ class BeatDetectionDemo(Demo):
 
 
 class SongDemo(Demo):
-    def __init__(self, gesture_controller, midi_files: [str], gesture_midi_files: [str], shimon_port: MidiOutDevice,
+    def __init__(self, gesture_controller, midi_files: [[str]], gesture_midi_files: [[str]], shimon_port: MidiOutDevice,
                  start_note_for_phrase_mapping: int = 36, complete_callback=None, user_data=None):
         super().__init__()
         self.gesture_controller = gesture_controller
         self.phrase_note_map = start_note_for_phrase_mapping
         self.user_data = user_data
+        self.phrase_idx = 0
         self.phrases = self._parse_midi(midi_files)
         self.g_phrases = self._parse_midi(gesture_midi_files)
-        self.file_tempo = self.phrases[0].tempo
+        self.file_tempo = self.phrases[self.phrase_idx][0].tempo
+        self.next_phrase = self.phrases[self.phrase_idx][0]  # intro phrase
+        self.next_g_phrase = self.g_phrases[self.phrase_idx][0]  # intro gesture
         self.ticks = 480
         self.tempo = self.file_tempo
         self.playing = False
@@ -433,8 +476,6 @@ class SongDemo(Demo):
         self.lock = Lock()
         self.callback_queue = Queue(1)
         self.callback_queue.put(complete_callback)
-        self.next_phrase = self.phrases[0]  # intro phrase
-        self.next_g_phrase = self.g_phrases[0]  # intro gesture
         self._midi_out_device = shimon_port
         self.performer = Performer(self._midi_out_device, self.file_tempo, self.ticks, self.gesture_controller)
 
@@ -458,13 +499,18 @@ class SongDemo(Demo):
     def handle_midi(self, msg, dt):
         if msg[0] == NOTE_ON:
             # print(msg)
-            self.set_phrase((msg[1] - self.phrase_note_map))
+            idx = msg[1] - self.phrase_note_map
+            if 0 <= idx < len(self.phrases):
+                self.phrase_idx = idx
+            self.set_phrase()
 
-    def set_phrase(self, idx):
+    def set_phrase(self):
+        idx = self.phrase_idx
         if len(self.phrases) > idx >= 0:
-            self.next_phrase = self.phrases[idx]
-            self.next_g_phrase = self.g_phrases[idx]
-            print(self.next_phrase.name)
+            variation = np.random.randint(0, len(self.phrases[idx]) - 1)
+            self.next_phrase = self.phrases[idx][variation]
+            self.next_g_phrase = self.g_phrases[idx][variation]
+            print(self.next_phrase[idx][variation].name)
 
     def perform(self, phrase: Phrase or None, gestures: Phrase or None):
         if phrase.is_korvai:
@@ -472,13 +518,12 @@ class SongDemo(Demo):
             self.next_g_phrase = None
 
         if phrase.is_intro and len(self.phrases) > 1:
-            self.next_phrase = self.phrases[1]
-            self.next_g_phrase = self.g_phrases[1]
+            self.phrase_idx = 1
 
-        # self.performer.test_perform(phrase=phrase, tempo=self.tempo, wait_for_measure_end=True)
         self.performer.perform(phrase, gestures, self.tempo, wait_for_measure_end=True)
 
         if self.next_phrase and self.next_g_phrase:
+            self.set_phrase()    # Calling this here will randomize variation
             self.perform(phrase=self.next_phrase, gestures=self.next_g_phrase)
 
     def wait(self):
@@ -489,26 +534,28 @@ class SongDemo(Demo):
         if not midi_files:
             return None
 
+        # Func to use as key for the sort method
         def note_sort(_note):
             return _note.start
 
         phrases = []
 
-        for midi_file in midi_files:
-            name = os.path.splitext(os.path.split(midi_file)[-1])[0]
-            midi_data = pretty_midi.PrettyMIDI(midi_file)
-            self.ticks = midi_data.resolution
-            notes = sorted(midi_data.instruments[0].notes, key=note_sort)
-            onsets = []
-            for note in notes:
-                onsets.append(midi_data.time_to_tick(note.start))
-
-            # print(name)
-            # print(notes)
-            # print(onsets)
-            # print()
-
-            phrases.append(Phrase(notes, onsets, round(midi_data.get_tempo_changes()[1][0], 3), name))
+        for variations in midi_files:
+            temp = []
+            for midi_file in variations:
+                name = os.path.splitext(os.path.split(midi_file)[-1])[0]
+                midi_data = pretty_midi.PrettyMIDI(midi_file)
+                self.ticks = midi_data.resolution
+                notes = sorted(midi_data.instruments[0].notes, key=note_sort)
+                onsets = []
+                for note in notes:
+                    onsets.append(midi_data.time_to_tick(note.start))
+                # print(name)
+                # print(notes)
+                # print(onsets)
+                # print()
+                temp.append(Phrase(notes, onsets, round(midi_data.get_tempo_changes()[1][0], 3), name))
+            phrases.append(temp)
         return phrases
 
     def reset(self):

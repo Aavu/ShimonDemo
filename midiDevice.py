@@ -52,7 +52,6 @@ class MidiOutDevice:
         if virtual:
             self.midi_out.open_virtual_port(name)
             print(f"Creating virtual midi device - {name}")
-            self._initialized = True
         else:
             ports = self.midi_out.get_ports()
             for i, name in enumerate(ports):
@@ -61,7 +60,12 @@ class MidiOutDevice:
                     print(f"Using MIDI Out Device: {self.name}")
                     self._initialized = True
                     return
+
+            # Fallback to virtual port
             print(f"Warning: MIDI device - {self.name} - not found")
+            self.midi_out.open_virtual_port(name)
+            print(f"Creating virtual midi device - {name}")
+        self._initialized = True
 
     @staticmethod
     def list_devices():
