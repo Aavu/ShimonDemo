@@ -63,8 +63,8 @@ class MidiOutDevice:
 
             # Fallback to virtual port
             print(f"Warning: MIDI device - {self.name} - not found")
-            self.midi_out.open_virtual_port(name)
-            print(f"Creating virtual midi device - {name}")
+            self.midi_out.open_virtual_port(self.name)
+            print(f"Creating virtual midi device - {self.name}")
         self._initialized = True
 
     @staticmethod
