@@ -9,7 +9,7 @@ from enum import IntEnum
 import pretty_midi
 from pretty_midi import Note
 import pyaudio
-from midiDevice import MidiOutDevice
+from pythonosc import udp_client
 from rtmidi.midiconstants import NOTE_OFF, NOTE_ON
 from audioToMidi import AudioMidiConverter
 from audioDevice import AudioDevice
@@ -82,17 +82,20 @@ class Phrase:
         return ret
 
 
-class Performer:
-    def __init__(self, device, tempo=None, ticks=None, gesture_controller=None, min_note_dist_ms=1,
+class Performer(GestureController):
+    def __init__(self, osc_address: str, osc_port: int, gesture_note_mapping: dict[str, int], osc_arm_route: str = "/arm",
+                 osc_head_route: str = "/head", tempo=None, ticks=None, min_note_dist_ms=50,
                  max_notes_per_onset=4):
+        self.client = udp_client.SimpleUDPClient(osc_address, osc_port)
+        super().__init__(self.client, gesture_note_mapping, osc_head_route)
         self.tempo = tempo
-        self.device = device
-        self.gesture_controller = gesture_controller
+        self.osc_arm_route = osc_arm_route
         self.ticks = ticks
         self.min_note_dist_ms = min_note_dist_ms
         self.max_notes_per_onset = max_notes_per_onset
         self.note_on_thread = Thread()
         self.note_off_thread = Thread()
+        self.lock = Lock()
         self.stop_event = threading.Event()
         self.timer = None
 
@@ -128,7 +131,9 @@ class Performer:
             self.stop_event.wait(dly)
             # time.sleep(dly)
             now = time.time()
-            self.gesture_controller.send(note.pitch, note.velocity)
+            self.lock.acquire()
+            self.send_gesture(note.pitch, note.velocity)
+            self.lock.release()
             prev_start = note.start
 
     def handle_note_offs(self, notes: [Note], tempo: int):
@@ -143,9 +148,10 @@ class Performer:
                 return
             dly = max(0, ((note.end - prev_end) * m) - (time.time() - now))
             self.stop_event.wait(dly)
-            # time.sleep(dly)
             now = time.time()
-            self.gesture_controller.send(note.pitch, 0)
+            self.lock.acquire()
+            self.send_gesture(note.pitch, 0)
+            self.lock.release()
             prev_end = note.end
 
     def perform(self, phrase: Phrase, gestures: Phrase or None, tempo=None, wait_for_measure_end=False):
@@ -181,17 +187,13 @@ class Performer:
                 if i < len(notes):
                     duration = notes[i].start - poly_notes[0].start
                 for j in range(len(poly_notes)):
-                    note_on = [NOTE_ON, poly_notes[j].pitch, poly_notes[j].velocity]
-                    note_off = [NOTE_OFF, poly_notes[j].pitch, 0]
-                    self.device.send(note_on)
-                    self.device.send(note_off)
+                    note_on = [int(poly_notes[j].pitch), int(poly_notes[j].velocity)]
+                    self.client.send_message(self.osc_arm_route, note_on)
             else:
                 if i < len(notes) - 1:
                     duration = notes[i + 1].start - notes[i].start
-                note_on = [NOTE_ON, notes[i].pitch, notes[i].velocity]
-                note_off = [NOTE_OFF, notes[i].pitch, 0]
-                self.device.send(note_on)
-                self.device.send(note_off)
+                note_on = [int(notes[i].pitch), int(notes[i].velocity)]
+                self.client.send_message(self.osc_arm_route, note_on)
                 i += 1
 
             time.sleep(duration * m)
@@ -224,7 +226,7 @@ class Performer:
         temp.append(notes[0], onsets[0])
         for i in range(1, len(phrase)):
             d_time = abs(notes[i].start - temp[-1][0].start)
-            if d_time < 1e-6:
+            if d_time < 1e-2:
                 if same_onset_count >= max_notes_per_onset - 1:
                     continue
                 same_onset_count += 1
@@ -243,13 +245,11 @@ class Demo:
 
 
 class QnADemo(Demo):
-    def __init__(self, gesture_controller: GestureController, raga_map, shimon_port: MidiOutDevice, sr=16000,
+    def __init__(self, performer: Performer, raga_map, sr=16000,
                  instruments=("Violin", "Keys"), frame_size=2048, activation_threshold=0.02, n_wait=16,
                  input_dev_name='Line 6 HX Stomp', outlier_filter_coeff=2, timeout_sec=2):
         super().__init__()
         self.active = False
-
-        self.gesture_controller = gesture_controller
         self.activation_threshold = activation_threshold
         self.n_wait = n_wait
         self.wait_count = 0
@@ -261,8 +261,6 @@ class QnADemo(Demo):
         self.process_thread = Thread()
         self.event = Event()
         self.lock = Lock()
-
-        self._midi_out_device = shimon_port
 
         try:
             self.audioDevice = AudioDevice(self.callback_fn, rate=sr, frame_size=frame_size,
@@ -280,7 +278,7 @@ class QnADemo(Demo):
         self.instruments = Instruments(instruments) if self.audioDevice else Instruments(["Keys"])
         self.timeout = timeout_sec
         self.last_time = time.time()
-        self.performer = Performer(self._midi_out_device, None)
+        self.performer = performer
 
     def reset_var(self):
         self.wait_count = 0
@@ -401,13 +399,14 @@ class QnADemo(Demo):
         self.event.set()
 
     def perform(self, phrase):
-        self.gesture_controller.send(gesture="look", velocity=3)  # Look straight
-        self.gesture_controller.send(gesture="headcircle", velocity=80)
+        self.performer.send_gesture(gesture="look", velocity=3)  # Look straight
+        self.performer.send_gesture(gesture="headcircle", velocity=80)
         # threading.Timer(0.5, self.gesture_controller.send, kwargs={"gesture": "headcircle", "velocity": 80}).start()
         # time.sleep(0.5)     # Shimon hardware wait simulation
         self.performer.perform(phrase=phrase, gestures=None)
-        self.gesture_controller.send(gesture="headcircle", velocity=0)
-        self.gesture_controller.send(gesture="look", velocity=next(self.instruments) + 1)  # Look at the respective artist
+        self.performer.send_gesture(gesture="headcircle", velocity=0)
+        self.performer.send_gesture(gesture="look",
+                                    velocity=next(self.instruments) + 1)  # Look at the respective artist
 
     @staticmethod
     def process_midi_phrase(phrase, temperature: float = 1.0):
@@ -418,7 +417,7 @@ class QnADemo(Demo):
         indices = np.random.choice(np.arange(len(phrase)), n_notes_to_change, replace=False, p=p)
         options = np.unique(phrase.get_raw_notes())
         for i in indices:
-            phrase.notes[i].pitch = np.random.choice(options, 1)
+            phrase.notes[i].pitch = np.random.choice(options, 1)[0]
         return phrase
 
     def check_timeout(self):
@@ -442,15 +441,14 @@ class QnADemo(Demo):
 
 
 class BeatDetectionDemo(Demo):
-    def __init__(self, gesture_controller: GestureController, tempo_range: tuple = (60, 120), smoothing=4,
-                 n_beats_to_track=16, timeout_sec=5,
-                 timeout_callback=None, user_data=None):
+    def __init__(self, performer: Performer, tempo_range: tuple = (60, 120), smoothing=4, n_beats_to_track=16,
+                 timeout_sec=5, timeout_callback=None, user_data=None, default_tempo: int = 80):
         super().__init__()
-        self.gesture_controller = gesture_controller
+        self.performer = performer
         self.timeout_callback = timeout_callback
         self.user_data = user_data
         self.tempo_tracker = TempoTracker(smoothing=smoothing, n_beats_to_track=n_beats_to_track,
-                                          tempo_range=tempo_range,
+                                          tempo_range=tempo_range, default_tempo=default_tempo,
                                           timeout_sec=timeout_sec, timeout_callback=self.timeout_handle)
         self._event = threading.Event()
         self._first_time = True
@@ -459,7 +457,7 @@ class BeatDetectionDemo(Demo):
 
     def start(self):
         self._first_time = True
-        self.gesture_controller.send("look", 8)  # look at the keyboard artist
+        self.performer.send_gesture("look", 8)  # look at the keyboard artist
         self.tempo_tracker.start()
         self._event.clear()
 
@@ -494,16 +492,16 @@ class BeatDetectionDemo(Demo):
         self.timeout_callback(self.user_data)
 
     def gesture_ctl(self):
-        self.gesture_controller.send("beatOnce", 80)
+        self.performer.send_gesture("beatOnce", 80)
         if not self._event.is_set():
             threading.Timer(self._beat_interval, self.gesture_ctl).start()
 
 
 class SongDemo(Demo):
-    def __init__(self, gesture_controller, midi_files: [[str]], gesture_midi_files: [[str]], shimon_port: MidiOutDevice,
+    def __init__(self, performer: Performer, midi_files: [[str]], gesture_midi_files: [[str]],
                  start_note_for_phrase_mapping: int = 36, complete_callback=None, user_data=None):
         super().__init__()
-        self.gesture_controller = gesture_controller
+        self.performer = performer
         self.phrase_note_map = start_note_for_phrase_mapping
         self.user_data = user_data
         self.phrase_idx = 0
@@ -520,8 +518,6 @@ class SongDemo(Demo):
         self.lock = Lock()
         self.callback_queue = Queue(1)
         self.callback_queue.put(complete_callback)
-        self._midi_out_device = shimon_port
-        self.performer = Performer(self._midi_out_device, self.file_tempo, self.ticks, self.gesture_controller)
 
     def __del__(self):
         self.reset()
@@ -531,7 +527,7 @@ class SongDemo(Demo):
 
     def start(self):
         self.playing = True
-        self.gesture_controller.send("look", 8)  # look at the keyboard artist
+        self.performer.send_gesture("look", 8)  # look at the keyboard artist
         self.thread = Thread(target=self.perform, args=(self.next_phrase, self.next_g_phrase))
         self.thread.start()
 
@@ -554,7 +550,7 @@ class SongDemo(Demo):
             self.variation_idx = 0 if reset_variation else (self.variation_idx + 1) % len(self.phrases[idx])
             self.next_phrase = self.phrases[idx][self.variation_idx]
             self.next_g_phrase = self.g_phrases[idx][self.variation_idx]
-            print(self.next_phrase[idx][self.variation_idx].name)
+            print(self.next_phrase.name)
 
     def perform(self, phrase: Phrase or None, gestures: Phrase or None):
         if phrase.is_korvai:

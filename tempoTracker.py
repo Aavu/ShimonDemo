@@ -4,12 +4,12 @@ import threading
 
 
 class TempoTracker:
-    def __init__(self, n_beats_to_track=8, smoothing=5, timeout_sec=5, timeout_callback=None, tempo_range=(60, 120)):
+    def __init__(self, n_beats_to_track=8, smoothing=5, timeout_sec=5, timeout_callback=None, tempo_range=(60, 120), default_tempo=80):
         self.smoothing = smoothing
         self.timeout = timeout_sec
         self.history = None
         self.idx = 0
-        self.tempo = None
+        self.tempo = default_tempo
         self.num_out = 0
         self.last_time = time.time()
         self.first_time = True

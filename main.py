@@ -2,25 +2,21 @@
 Author: Raghavasimhan Sankaranarayanan
 Date: 04/08/2022
 """
-from midiDevice import MidiOutDevice, MidiInDevice
+from midiDevice import MidiInDevice
 from rtmidi.midiconstants import NOTE_ON
 import time
-from demos import Demo, BeatDetectionDemo, QnADemo, SongDemo
-from gestureController import GestureController
+from demos import Performer, Demo, BeatDetectionDemo, QnADemo, SongDemo
 
 
 class ShimonDemo:
-    def __init__(self, keyboard_name, mode_key, shimon_port_name, qna_param, bd_param, song_param, gesture_param):
-        self.gesture_controller = GestureController(**gesture_param)
-        self.shimon_port = MidiOutDevice(shimon_port_name)
+    def __init__(self, keyboard_name, mode_key, qna_param, bd_param, song_param, performer_param):
         self.mode_key = mode_key
-        self.qna_demo = QnADemo(gesture_controller=self.gesture_controller, shimon_port=self.shimon_port, **qna_param)
+        self.performer = Performer(ticks=480, **performer_param)
+        self.qna_demo = QnADemo(performer=self.performer, **qna_param)
 
         self.keys = MidiInDevice(keyboard_name, callback_fn=self.keys_callback)
-        self.bd_demo = BeatDetectionDemo(gesture_controller=self.gesture_controller,
-                                         timeout_callback=self.bd_timeout_callback, **bd_param)
-        self.song_demo = SongDemo(gesture_controller=self.gesture_controller, shimon_port=self.shimon_port,
-                                  complete_callback=self.song_complete_callback, **song_param)
+        self.bd_demo = BeatDetectionDemo(performer=self.performer, timeout_callback=self.bd_timeout_callback, **bd_param)
+        self.song_demo = SongDemo(performer=self.performer, complete_callback=self.song_complete_callback, **song_param)
         self.running = False
         self.current_demo = self.qna_demo
 
@@ -37,7 +33,7 @@ class ShimonDemo:
             else:
                 self.current_demo.handle_midi(msg, dt)
 
-    def song_complete_callback(self, user_data):    # Not Implemented
+    def song_complete_callback(self, user_data):  # Not Implemented
         self.stop()
 
     def manage_demos(self):
@@ -72,7 +68,6 @@ class ShimonDemo:
     def reset(self):
         self.stop()
         self.keys.reset()
-        self.gesture_controller.reset()
 
 
 if __name__ == '__main__':
@@ -82,11 +77,8 @@ if __name__ == '__main__':
     GESTURE_MIDI_FILES = [["gestures/intro.mid"], ["gestures/gestures_1A.mid", "gestures/gestures_1B.mid"],
                           ["gestures/gestures_2A.mid", "gestures/gestures_2B.mid"],
                           ["gestures/gestures_3A.mid", "gestures/gestures_3B.mid"], ["gestures/korvai.mid"]]
-    keyboard = "iRig KEYS 37"   # "iRig KEYS 37", "Vivo S1"
-    audio_interface = "Line 6 HX Stomp"
-    shimon_port = "to Max 11"
-    gesture_port = "to Max 2"  # "gestures"
-    g_virtual = False
+    keyboard = "iRig KEYS 37"  # "iRig KEYS 37", "Vivo S1"
+    audio_interface = "HX Stomp"     # "HX Stomp", "Line 6 HX Stomp"
 
     mode_key = 98
 
@@ -104,11 +96,14 @@ if __name__ == '__main__':
         "headcirclefast": 60
     }
 
-    gesture_params = {
+    performer_params = {
+        "osc_address": "127.0.0.1",
+        "osc_port": 20000,
         "gesture_note_mapping": gesture_note_mapping,
-        "midi_channel": 1,
-        "midi_device": gesture_port,
-        "virtual": g_virtual
+        "osc_arm_route": "/arm",
+        "osc_head_route": "/head",
+        "min_note_dist_ms": 50,
+        "max_notes_per_onset": 4
     }
 
     bd_params = {
@@ -134,10 +129,10 @@ if __name__ == '__main__':
         "n_wait": 4,
         "input_dev_name": audio_interface,
         "outlier_filter_coeff": 2,
-        "timeout_sec": 1
+        "timeout_sec": 0.5
     }
 
     # MidiInDevice.list_devices()
-    demo = ShimonDemo(keyboard, shimon_port_name=shimon_port, mode_key=mode_key, qna_param=qna_params,
-                      bd_param=bd_params, song_param=song_params, gesture_param=gesture_params)
+    demo = ShimonDemo(keyboard, mode_key=mode_key, qna_param=qna_params,
+                      bd_param=bd_params, song_param=song_params, performer_param=performer_params)
     demo.run()
