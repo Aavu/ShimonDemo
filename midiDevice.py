@@ -24,6 +24,7 @@ class MidiInDevice:
             self.initialized = True
         else:
             print(f"Warning: MIDI device - {self.name} - not found")
+            AssertionError("Midi Device Not found")
 
     @staticmethod
     def list_devices():

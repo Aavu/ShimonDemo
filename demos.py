@@ -83,9 +83,9 @@ class Phrase:
 
 
 class Performer(GestureController):
-    def __init__(self, osc_address: str, osc_port: int, gesture_note_mapping: dict[str, int], osc_arm_route: str = "/arm",
-                 osc_head_route: str = "/head", tempo=None, ticks=None, min_note_dist_ms=50,
-                 max_notes_per_onset=4):
+    def __init__(self, osc_address: str, osc_port: int, gesture_note_mapping: dict[str, int], osc_arm_route: str,
+                 osc_head_route: str, min_note_dist_ms,
+                 max_notes_per_onset, tempo = None, ticks = None):
         self.client = udp_client.SimpleUDPClient(osc_address, osc_port)
         super().__init__(self.client, gesture_note_mapping, osc_head_route)
         self.tempo = tempo
@@ -247,11 +247,13 @@ class Demo:
 class QnADemo(Demo):
     def __init__(self, performer: Performer, raga_map, sr=16000,
                  instruments=("Violin", "Keys"), frame_size=2048, activation_threshold=0.02, n_wait=16,
-                 input_dev_name='Line 6 HX Stomp', outlier_filter_coeff=2, timeout_sec=2):
+                 input_dev_name='Line 6 HX Stomp', outlier_filter_coeff=2,
+                 timeout_sec=2, randomness_temperature: float = 1.0):
         super().__init__()
         self.active = False
         self.activation_threshold = activation_threshold
         self.n_wait = n_wait
+        self.randomness_temperature = randomness_temperature
         self.wait_count = 0
         self.playing = False
         self.phrase = []
@@ -270,8 +272,7 @@ class QnADemo(Demo):
             print(f"{input_dev_name} not found. Disabling violin input for QnA Demo")
             self.audioDevice = None
 
-        self.audio2midi = AudioMidiConverter(raga_map=raga_map, sr=sr, frame_size=frame_size,
-                                             outlier_coeff=outlier_filter_coeff)
+        self.audio2midi = AudioMidiConverter(raga_map=raga_map, sr=sr, frame_size=frame_size)
         if self.audioDevice:
             self.audioDevice.start()
 
@@ -384,6 +385,7 @@ class QnADemo(Demo):
             print("notes:", notes)  # Send to shimon
             print("onsets:", onsets)
             phrase = Phrase(notes, onsets)
+            phrase = self.process_midi_phrase(phrase, self.randomness_temperature)
             self.perform(phrase)
 
         self._process()
@@ -410,9 +412,9 @@ class QnADemo(Demo):
 
     @staticmethod
     def process_midi_phrase(phrase, temperature: float = 1.0):
-        temperature = max(min(temperature, 1), 0)
-        n_notes_to_change = np.random.randint(0, int((len(phrase)) * temperature), 1)
-        w = np.hanning(len(phrase)) + 1e-6  # to avoid ValueError: Fewer non-zero entries in p than size
+        temp = max(min(temperature, 1), 0)
+        n_notes_to_change = np.random.randint(0, int((len(phrase)) * temp), 1)
+        w = np.maximum(0, temp - 1) + np.hanning(len(phrase)) + 1e-6  # to avoid ValueError: Fewer non-zero entries in p than size
         p = w / np.sum(w)
         indices = np.random.choice(np.arange(len(phrase)), n_notes_to_change, replace=False, p=p)
         options = np.unique(phrase.get_raw_notes())
@@ -433,7 +435,7 @@ class QnADemo(Demo):
                 midi_onsets[i] -= t
 
             phrase = Phrase(midi_notes, midi_onsets)
-            phrase = self.process_midi_phrase(phrase)
+            phrase = self.process_midi_phrase(phrase, self.randomness_temperature)
             self.perform(phrase)
 
         if not self.event.is_set():

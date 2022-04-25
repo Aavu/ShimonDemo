@@ -5,6 +5,7 @@ Date: 04/08/2022
 from midiDevice import MidiInDevice
 from rtmidi.midiconstants import NOTE_ON
 import time
+import numpy as np
 from demos import Performer, Demo, BeatDetectionDemo, QnADemo, SongDemo
 
 
@@ -12,9 +13,9 @@ class ShimonDemo:
     def __init__(self, keyboard_name, mode_key, qna_param, bd_param, song_param, performer_param):
         self.mode_key = mode_key
         self.performer = Performer(ticks=480, **performer_param)
+        self.keys = MidiInDevice(keyboard_name, callback_fn=self.keys_callback)
         self.qna_demo = QnADemo(performer=self.performer, **qna_param)
 
-        self.keys = MidiInDevice(keyboard_name, callback_fn=self.keys_callback)
         self.bd_demo = BeatDetectionDemo(performer=self.performer, timeout_callback=self.bd_timeout_callback, **bd_param)
         self.song_demo = SongDemo(performer=self.performer, complete_callback=self.song_complete_callback, **song_param)
         self.running = False
@@ -120,16 +121,19 @@ if __name__ == '__main__':
     }
 
     # Pass 'None' to not filter audioToMidi by any raga
-    bahudari_map = [1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0]
+    savithri_map = [1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0]
+
     qna_params = {
-        "raga_map": bahudari_map,
+        "raga_map": savithri_map,
+        "instruments": ("Violin", "Keys"),
         "sr": 16000,
         "frame_size": 2048,
         "activation_threshold": 0.01,
         "n_wait": 4,
         "input_dev_name": audio_interface,
-        "outlier_filter_coeff": 2,
-        "timeout_sec": 0.5
+        # "outlier_filter_coeff": 2,
+        "timeout_sec": 1,
+        "randomness_temperature": 1.0
     }
 
     # MidiInDevice.list_devices()
